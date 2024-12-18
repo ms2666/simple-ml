@@ -2,6 +2,7 @@ import torch
 from torch import nn
 
 from simple_ml.utils.activations import SwiGLU
+from simple_ml.utils.normalizations import RMSNorm
 
 
 class MLP(nn.Module):
@@ -117,3 +118,50 @@ class Attention(nn.Module):
         o = self.W_o(o)
 
         return o
+
+
+class DecoderLayer(nn.Module):
+    def __init__(
+        self,
+        hidden_size: int,
+        num_heads: int,
+        num_key_value_heads: int,
+        head_dim: int,
+        intermediate_size: int,
+    ):
+        super().__init__()
+
+        self.hidden_size = hidden_size
+
+        self.input_norm = RMSNorm(hidden_size)
+        self.self_attention = Attention(
+            hidden_size, num_heads, num_key_value_heads, head_dim
+        )
+        self.attention_norm = RMSNorm(hidden_size)
+        self.mlp = MLP(hidden_size, intermediate_size)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: torch.Tensor,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor],
+    ):
+        # apply input normalization
+        x = self.input_norm(hidden_states)
+
+        # apply self attention
+        x = self.self_attention(x, attention_mask, position_embeddings)
+
+        # add residual connection
+        x = x + hidden_states
+
+        # apply attention normalization
+        x = self.attention_norm(x)
+
+        # apply mlp
+        x = self.mlp(x)
+
+        # add residual connection
+        x = x + hidden_states
+
+        return x
