@@ -2,7 +2,7 @@ from collections import Counter
 from tqdm.auto import tqdm
 
 
-def get_stats(ids: list[int]) -> Counter:
+def get_stats(ids: list[int]) -> Counter[tuple[int, int]]:
     """
     Count frequency of consecutive pairs in the list of ids.
 
@@ -27,7 +27,7 @@ def merge(ids: list[int], pair: tuple[int, int], idx: int) -> list[int]:
     Returns:
         list of int: The updated list of token IDs after merging.
     """
-    new_ids = []
+    new_ids: list[int] = []
     i = 0
 
     while i < len(ids):
@@ -46,7 +46,7 @@ SINGLE_BYTE_TOKENS = 256
 
 class BasicTokenizer:
     def __init__(self):
-        self.vocab: dict[int, int] = {}
+        self.vocab: dict[int, bytes] = {}
         self.merges: dict[tuple[int, int], int] = {}
 
     def train(self, text: str, vocab_size: int) -> None:
@@ -60,7 +60,8 @@ class BasicTokenizer:
         # Initialize vocabulary with single-byte tokens
         ids = list(text.encode("utf-8"))
         # using 2^8 = 256 because a byte is 8 bits. So 255 is the max value a single byte can take
-        self.vocab = {i: bytes([i]) for i in range(SINGLE_BYTE_TOKENS)}
+        self.vocab = {}
+        self.vocab.update({i: bytes([i]) for i in range(SINGLE_BYTE_TOKENS)})
         self.merges = {}
 
         for i in tqdm(
@@ -88,9 +89,8 @@ class BasicTokenizer:
         Returns:
             str: The decoded string.
         """
-        return b"".join(self.vocab.get(idx, b"?") for idx in ids).decode(
-            "utf-8", errors="replace"
-        )
+        ids_to_bytes = [bytes(self.vocab.get(idx, b"?")) for idx in ids]
+        return b"".join(ids_to_bytes).decode("utf-8", errors="replace")
 
     def encode(self, text: str) -> list[int]:
         """
