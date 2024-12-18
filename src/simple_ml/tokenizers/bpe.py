@@ -1,7 +1,8 @@
 from collections import Counter
+from tqdm.auto import tqdm
 
 
-def get_stats(ids):
+def get_stats(ids: list[int]) -> Counter:
     """
     Count frequency of consecutive pairs in the list of ids.
 
@@ -11,10 +12,10 @@ def get_stats(ids):
     Returns:
         Counter: A Counter object mapping pairs to their frequencies.
     """
-    return Counter(zip(ids, ids[1:]))
+    return Counter(zip(ids[:-1], ids[1:]))
 
 
-def merge(ids, pair, idx):
+def merge(ids: list[int], pair: tuple[int, int], idx: int) -> list[int]:
     """
     Merge a specified pair in the list of ids into a new id.
 
@@ -40,45 +41,42 @@ def merge(ids, pair, idx):
     return new_ids
 
 
+SINGLE_BYTE_TOKENS = 256
+
+
 class BasicTokenizer:
     def __init__(self):
-        self.vocab = {}
-        self.merges = {}
+        self.vocab: dict[int, int] = {}
+        self.merges: dict[tuple[int, int], int] = {}
 
-    def train(self, text, vocab_size, verbose=False):
+    def train(self, text: str, vocab_size: int) -> None:
         """
         Train the tokenizer on the provided text to build the vocabulary.
 
         Args:
             text (str): The input text to train on.
             vocab_size (int): The desired size of the vocabulary.
-            verbose (bool): If True, print progress messages.
         """
         # Initialize vocabulary with single-byte tokens
         ids = list(text.encode("utf-8"))
         # using 2^8 = 256 because a byte is 8 bits. So 255 is the max value a single byte can take
-        self.vocab = {i: bytes([i]) for i in range(256)}
+        self.vocab = {i: bytes([i]) for i in range(SINGLE_BYTE_TOKENS)}
         self.merges = {}
 
-        for i in range(vocab_size - 256):
+        for i in range(vocab_size - SINGLE_BYTE_TOKENS):
             stats = get_stats(ids)
             if not stats:
                 break
             # Select the most frequent pair
-            pair, freq = stats.most_common(1)[0]
-            idx = 256 + i
+            pair, _ = stats.most_common(1)[0]
+            idx = SINGLE_BYTE_TOKENS + i
             # Merge the selected pair
             ids = merge(ids, pair, idx)
             # Update merges and vocabulary
             self.merges[pair] = idx
             self.vocab[idx] = self.vocab[pair[0]] + self.vocab[pair[1]]
-            if verbose:
-                merged_bytes = self.vocab[idx]
-                print(
-                    f"Merge {i+1}/{vocab_size - 256}: {pair} -> {idx} ({merged_bytes}) occurred {freq} times"
-                )
 
-    def decode(self, ids):
+    def decode(self, ids: list[int]) -> str:
         """
         Decode a list of IDs back into a string.
 
@@ -92,7 +90,7 @@ class BasicTokenizer:
             "utf-8", errors="replace"
         )
 
-    def encode(self, text):
+    def encode(self, text: str) -> list[int]:
         """
         Encode a string into a list of token IDs based on the trained merges.
 
