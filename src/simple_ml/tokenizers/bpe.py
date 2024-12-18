@@ -63,7 +63,9 @@ class BasicTokenizer:
         self.vocab = {i: bytes([i]) for i in range(SINGLE_BYTE_TOKENS)}
         self.merges = {}
 
-        for i in range(vocab_size - SINGLE_BYTE_TOKENS):
+        for i in tqdm(
+            range(vocab_size - SINGLE_BYTE_TOKENS), desc="Training BPE", leave=False
+        ):
             stats = get_stats(ids)
             if not stats:
                 break

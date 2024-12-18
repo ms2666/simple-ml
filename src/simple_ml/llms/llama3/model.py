@@ -165,3 +165,11 @@ class DecoderLayer(nn.Module):
         x = x + hidden_states
 
         return x
+
+
+class LLamaModel(nn.Module):
+    def __init__(self):
+        pass
+
+    def forward(self):
+        pass
