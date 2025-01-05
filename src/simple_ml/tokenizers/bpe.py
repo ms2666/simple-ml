@@ -45,17 +45,17 @@ SINGLE_BYTE_TOKENS = 256
 
 
 class BasicTokenizer:
-    def __init__(self):
+    def __init__(self, vocab_size: int):
         self.vocab: dict[int, bytes] = {}
         self.merges: dict[tuple[int, int], int] = {}
+        self.vocab_size = vocab_size
 
-    def train(self, text: str, vocab_size: int) -> None:
+    def train(self, text: str) -> None:
         """
         Train the tokenizer on the provided text to build the vocabulary.
 
         Args:
             text (str): The input text to train on.
-            vocab_size (int): The desired size of the vocabulary.
         """
         # Initialize vocabulary with single-byte tokens
         ids = list(text.encode("utf-8"))
@@ -65,7 +65,7 @@ class BasicTokenizer:
         self.merges = {}
 
         for i in tqdm(
-            range(vocab_size - SINGLE_BYTE_TOKENS), desc="Training BPE", leave=False
+            range(self.vocab_size - SINGLE_BYTE_TOKENS), desc="Training BPE", leave=False
         ):
             stats = get_stats(ids)
             if not stats:
@@ -111,3 +111,6 @@ class BasicTokenizer:
                 break
             ids = merge(ids, pair, self.merges[pair])
         return ids
+    
+    def __repr__(self) -> str:
+        return f"BasicTokenizer(vocab_size={self.vocab_size})"

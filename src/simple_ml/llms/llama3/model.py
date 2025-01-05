@@ -3,30 +3,45 @@ from torch import nn
 
 from simple_ml.utils.activations import SwiGLU
 from simple_ml.utils.normalizations import RMSNorm
+from simple_ml.utils.position_embeddings import RotaryEmbedding
+from dataclasses import dataclass
+
+
+@dataclass
+class LlamaConfig:
+    emb_hidden_size: int
+    num_heads: int
+    num_key_value_heads: int
+    head_dim: int
+    mlp_intermediate_size: int
+    num_layers: int
+    rope_base: float
+    d: int
+    vocab_size: int
 
 
 class MLP(nn.Module):
-    def __init__(self, hidden_size: int, intermediate_size: int):
+    def __init__(self, config: LlamaConfig) -> None:
         super().__init__()
 
-        self.swiglu = SwiGLU(hidden_size, intermediate_size)
-        self.down_proj = nn.Linear(intermediate_size, hidden_size, bias=False)
+        self.swiglu = SwiGLU(config.emb_hidden_size, config.mlp_intermediate_size)
+        self.down_proj = nn.Linear(
+            config.mlp_intermediate_size, config.emb_hidden_size, bias=False
+        )
 
     def forward(self, x):
         return self.down_proj(self.swiglu(x))
 
 
 class Attention(nn.Module):
-    def __init__(
-        self, hidden_size: int, num_heads: int, num_key_value_heads: int, head_dim: int
-    ):
+    def __init__(self, config: LlamaConfig):
         super().__init__()
 
         # define attributes
-        self.hidden_size = hidden_size
-        self.num_heads = num_heads
-        self.head_dim = head_dim
-        self.num_key_value_heads = num_key_value_heads
+        self.hidden_size = config.emb_hidden_size
+        self.num_heads = config.num_heads
+        self.head_dim = config.head_dim
+        self.num_key_value_heads = config.num_key_value_heads
 
         # define weights
         self.W_q = nn.Linear(
@@ -123,22 +138,16 @@ class Attention(nn.Module):
 class DecoderLayer(nn.Module):
     def __init__(
         self,
-        hidden_size: int,
-        num_heads: int,
-        num_key_value_heads: int,
-        head_dim: int,
-        intermediate_size: int,
+        config: LlamaConfig,
     ):
         super().__init__()
 
-        self.hidden_size = hidden_size
+        self.hidden_size = config.emb_hidden_size
 
-        self.input_norm = RMSNorm(hidden_size)
-        self.self_attention = Attention(
-            hidden_size, num_heads, num_key_value_heads, head_dim
-        )
-        self.attention_norm = RMSNorm(hidden_size)
-        self.mlp = MLP(hidden_size, intermediate_size)
+        self.input_norm = RMSNorm(config.emb_hidden_size)
+        self.self_attention = Attention(config)
+        self.attention_norm = RMSNorm(config.emb_hidden_size)
+        self.mlp = MLP(config)
 
     def forward(
         self,
@@ -168,8 +177,15 @@ class DecoderLayer(nn.Module):
 
 
 class LLamaModel(nn.Module):
-    def __init__(self):
-        pass
+    def __init__(self, config: LlamaConfig):
+
+        self.rotary_embedding = RotaryEmbedding(
+            base=config.rope_base, d=config.emb_hidden_size
+        )
+        self.layers = nn.ModuleList(
+            [DecoderLayer(config) for _ in range(config.num_layers)]
+        )
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.emb_hidden_size)
 
     def forward(self):
         pass
