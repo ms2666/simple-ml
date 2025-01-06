@@ -16,6 +16,7 @@ torch = "^2.5.1"
 torchvision = "^0.20.1"
 tqdm = "^4.67.1"
 orjson = "^3.10.12"
+scikit-learn = "^1.6.0"
 
 
 [build-system]
