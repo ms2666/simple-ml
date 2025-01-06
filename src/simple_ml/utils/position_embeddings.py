@@ -9,6 +9,12 @@ class RotaryEmbedding(nn.Module):
         self.base = base
         self.d = d
 
+        # compute angle frequencies
+        self.theta = nn.Parameter(
+            1 / (self.base ** (torch.arange(0, self.d, 2) / self.d)),
+            requires_grad=False,
+        )
+
     @torch.no_grad()
     def forward(self, position_ids):
         """Adds rotary embeddings to hidden states.
@@ -21,11 +27,8 @@ class RotaryEmbedding(nn.Module):
             sin: tensor of shape [batch_size, seq_len, self.d]
         """
 
-        # compute angle frequencies
-        theta = 1 / (self.base ** (torch.arange(0, self.d, 2) / self.d))
-
         # for each position, compute the angle
-        angle = torch.einsum("a,bc->bca", theta, position_ids)
+        angle = torch.einsum("a,bc->bca", self.theta, position_ids)
 
         anglex2 = angle.repeat(1, 1, 2)
         sin, cos = anglex2.sin(), anglex2.cos()
