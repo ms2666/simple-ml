@@ -10,14 +10,27 @@ from dataclasses import dataclass
 @dataclass
 class LlamaConfig:
     emb_hidden_size: int
-    num_heads: int
+    num_attn_heads: int
     num_key_value_heads: int
-    head_dim: int
     mlp_intermediate_size: int
     num_layers: int
     rope_base: float
-    d: int
     vocab_size: int
+
+    @property
+    def head_dim(self) -> int:
+        return self.emb_hidden_size // self.num_attn_heads
+
+    def __post_init__(self):
+        assert (
+            self.emb_hidden_size % self.num_attn_heads == 0
+        ), "hidden_size must be divisible by num_heads"
+        assert (
+            self.emb_hidden_size % self.num_key_value_heads == 0
+        ), "hidden_size must be divisible by num_key_value_heads"
+        assert (
+            self.num_attn_heads % self.num_key_value_heads == 0
+        ), "num_heads must be divisible by num_key_value_heads"
 
 
 class MLP(nn.Module):
@@ -39,7 +52,7 @@ class Attention(nn.Module):
 
         # define attributes
         self.hidden_size = config.emb_hidden_size
-        self.num_heads = config.num_heads
+        self.num_heads = config.num_attn_heads
         self.head_dim = config.head_dim
         self.num_key_value_heads = config.num_key_value_heads
 
@@ -52,6 +65,10 @@ class Attention(nn.Module):
         )
         self.W_v = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim)
         self.W_o = nn.Linear(self.num_heads * self.head_dim, self.hidden_size)
+
+        self.reshape_and_rotate = lambda x: x.view(
+            x.size(0), x.size(1), -1, self.head_dim
+        ).transpose(1, 2)
 
     @property
     def num_key_value_groups(self) -> int:
@@ -87,7 +104,7 @@ class Attention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         attention_mask: torch.Tensor,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor],
+        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None,
     ):
         q = self.W_q(hidden_states)  # [batch_size, seq_len, num_heads * head_dim]
         k = self.W_k(
@@ -98,13 +115,14 @@ class Attention(nn.Module):
         )  # [batch_size, seq_len, num_key_value_heads * head_dim]
 
         # reshape q, k, v into [batch_size, num_heads, seq_len, head_dim]
-        q = q.view(q.size(0), q.size(1), -1, self.head_dim).transpose(1, 2)
-        k = k.view(k.size(0), k.size(1), -1, self.head_dim).transpose(1, 2)
-        v = v.view(v.size(0), v.size(1), -1, self.head_dim).transpose(1, 2)
+        q = self.reshape_and_rotate(q)
+        k = self.reshape_and_rotate(k)
+        v = self.reshape_and_rotate(v)
 
-        # apply rotary embeddings to queries and keys
-        cos, sin = position_embeddings
-        q, k = self.apply_rotary_embeddings(q, k, cos, sin)
+        # apply rotary embeddings to queries and keys if provided
+        if position_embeddings is not None:
+            cos, sin = position_embeddings
+            q, k = self.apply_rotary_embeddings(q, k, cos, sin)
 
         # repeat keys and values for each head
         k = torch.repeat_interleave(k, self.num_key_value_groups, dim=1)
@@ -159,33 +177,64 @@ class DecoderLayer(nn.Module):
         x = self.input_norm(hidden_states)
 
         # apply self attention
-        x = self.self_attention(x, attention_mask, position_embeddings)
+        attn_output = self.self_attention(x, attention_mask, position_embeddings)
 
         # add residual connection
-        x = x + hidden_states
+        x = attn_output + hidden_states
 
         # apply attention normalization
         x = self.attention_norm(x)
 
         # apply mlp
-        x = self.mlp(x)
+        mlp_output = self.mlp(x)
 
         # add residual connection
-        x = x + hidden_states
+        x = mlp_output + hidden_states
 
         return x
 
 
-class LLamaModel(nn.Module):
+class LlamaModel(nn.Module):
     def __init__(self, config: LlamaConfig):
+        super().__init__()
 
         self.rotary_embedding = RotaryEmbedding(
-            base=config.rope_base, d=config.emb_hidden_size
+            base=config.rope_base, d=config.head_dim
         )
         self.layers = nn.ModuleList(
             [DecoderLayer(config) for _ in range(config.num_layers)]
         )
         self.embed_tokens = nn.Embedding(config.vocab_size, config.emb_hidden_size)
+        self.lm_head = nn.Linear(config.emb_hidden_size, config.vocab_size)
 
-    def forward(self):
-        pass
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Forward pass of the LLamaModel.
+
+        Args:
+            input_ids (torch.Tensor): Tensor of shape (batch_size, seq_length) containing token IDs.
+            attention_mask (torch.Tensor): Tensor of shape (batch_size, seq_length) where 1 indicates valid tokens and 0 indicates padding.
+
+        Returns:
+            torch.Tensor: Logits of shape (batch_size, seq_length, vocab_size).
+        """
+        # Get embeddings
+        hidden_states = self.embed_tokens(
+            input_ids
+        )  # [batch_size, seq_length, hidden_size]
+
+        # Compute rotary position embeddings
+        cos, sin = self.rotary_embedding(input_ids)
+
+        # Pass through each decoder layer
+        for layer in self.layers:
+            hidden_states = layer(hidden_states, attention_mask, (cos, sin))
+
+        # Compute logits
+        logits = self.lm_head(hidden_states)  # [batch_size, seq_length, vocab_size]
+
+        return logits
